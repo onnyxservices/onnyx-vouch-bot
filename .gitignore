@@ -1,0 +1,10 @@
+.env
+bot.log
+__pycache__/
+*.pyc
+vouch_counts.json
+staff_vouches.json
+product_vouches.json
+config.json
+bot_stderr.txt
+bot_stdout.txt
