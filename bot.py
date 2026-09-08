@@ -712,13 +712,19 @@ async def couponcreate(
 @app_commands.describe(code="The coupon code to look up")
 @app_commands.guild_only()
 async def couponinfo(interaction: discord.Interaction, code: str):
+    if "ticket" not in interaction.channel.name.lower():
+        await interaction.response.send_message(
+            "This command can only be used in ticket channels.", ephemeral=True
+        )
+        return
+
     if not SELLAUTH_SHOP_ID or not SELLAUTH_API_KEY:
         await interaction.response.send_message(
             "SellAuth API is not configured.", ephemeral=True
         )
         return
 
-    await interaction.response.defer(ephemeral=True)
+    await interaction.response.defer()
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -728,7 +734,7 @@ async def couponinfo(interaction: discord.Interaction, code: str):
             ) as resp:
                 if resp.status != 200:
                     await interaction.followup.send(
-                        f"Failed to fetch coupons (API returned {resp.status}).", ephemeral=True
+                        f"Failed to fetch coupons (API returned {resp.status})."
                     )
                     return
                 result = await resp.json()
@@ -742,7 +748,7 @@ async def couponinfo(interaction: discord.Interaction, code: str):
 
         if not target:
             await interaction.followup.send(
-                f"Coupon `{code.upper()}` not found.", ephemeral=True
+                f"Coupon `{code.upper()}` not found."
             )
             return
 
@@ -772,7 +778,7 @@ async def couponinfo(interaction: discord.Interaction, code: str):
     except Exception as e:
         logging.error("SellAuth API error: %s", e)
         await interaction.followup.send(
-            "Error connecting to SellAuth API.", ephemeral=True
+            "Error connecting to SellAuth API."
         )
 
 
