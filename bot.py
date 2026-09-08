@@ -668,6 +668,40 @@ async def couponcreate(
     embed.set_footer(text=f"Created by {interaction.user.display_name}")
     await interaction.followup.send(embed=embed)
 
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"https://api.sellauth.com/v1/shops/{SELLAUTH_SHOP_ID}/coupons",
+                headers={"Authorization": f"Bearer {SELLAUTH_API_KEY}"},
+            ) as resp:
+                if resp.status == 200:
+                    coupons = await resp.json()
+                    coupon_list = coupons.get("data", [])
+                    sorted_coupons = sorted(coupon_list, key=lambda c: c.get("uses", 0), reverse=True)[:10]
+                    medals = ["\U0001F947", "\U0001F948", "\U0001F949"]
+                    lb_lines = []
+                    for j, c in enumerate(sorted_coupons):
+                        prefix = medals[j] if j < 3 else f"**#{j+1}**"
+                        lb_code = c.get("code", "???")
+                        uses = c.get("uses", 0)
+                        disc = c.get("discount", "0")
+                        ctype = c.get("type", "percentage")
+                        if ctype == "percentage":
+                            disc_str = f"{disc}%"
+                        else:
+                            disc_str = f"${disc}"
+                        lb_lines.append(f"{prefix} **{lb_code}** — {uses} uses ({disc_str} off)")
+                    lb_embed = discord.Embed(
+                        title="Coupon Leaderboard",
+                        description="\n".join(lb_lines),
+                        color=0x5865F2,
+                        timestamp=discord.utils.utcnow(),
+                    )
+                    lb_embed.set_footer(text="From onnyxtweaks.mysellauth.com")
+                    await interaction.followup.send(embed=lb_embed)
+    except Exception as e:
+        logging.error("Failed to post leaderboard after coupon create: %s", e)
+
 
 @bot.tree.command(name="couponremove", description="Remove a coupon code from the website")
 @app_commands.describe(code="The coupon code to delete")
@@ -738,6 +772,40 @@ async def couponremove(interaction: discord.Interaction, code: str):
     )
     embed.set_footer(text=f"Deleted by {interaction.user.display_name}")
     await interaction.followup.send(embed=embed)
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"https://api.sellauth.com/v1/shops/{SELLAUTH_SHOP_ID}/coupons",
+                headers={"Authorization": f"Bearer {SELLAUTH_API_KEY}"},
+            ) as resp:
+                if resp.status == 200:
+                    coupons = await resp.json()
+                    coupon_list = coupons.get("data", [])
+                    sorted_coupons = sorted(coupon_list, key=lambda c: c.get("uses", 0), reverse=True)[:10]
+                    medals = ["\U0001F947", "\U0001F948", "\U0001F949"]
+                    lb_lines = []
+                    for j, c in enumerate(sorted_coupons):
+                        prefix = medals[j] if j < 3 else f"**#{j+1}**"
+                        lb_code = c.get("code", "???")
+                        uses = c.get("uses", 0)
+                        disc = c.get("discount", "0")
+                        ctype = c.get("type", "percentage")
+                        if ctype == "percentage":
+                            disc_str = f"{disc}%"
+                        else:
+                            disc_str = f"${disc}"
+                        lb_lines.append(f"{prefix} **{lb_code}** — {uses} uses ({disc_str} off)")
+                    lb_embed = discord.Embed(
+                        title="Coupon Leaderboard",
+                        description="\n".join(lb_lines),
+                        color=0x5865F2,
+                        timestamp=discord.utils.utcnow(),
+                    )
+                    lb_embed.set_footer(text="From onnyxtweaks.mysellauth.com")
+                    await interaction.followup.send(embed=lb_embed)
+    except Exception as e:
+        logging.error("Failed to post leaderboard after coupon remove: %s", e)
 
 
 @bot.event
