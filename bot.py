@@ -708,6 +708,74 @@ async def couponcreate(
     await interaction.followup.send(embed=embed)
 
 
+@bot.tree.command(name="couponinfo", description="Look up a coupon code and see its usage stats")
+@app_commands.describe(code="The coupon code to look up")
+@app_commands.guild_only()
+async def couponinfo(interaction: discord.Interaction, code: str):
+    if not SELLAUTH_SHOP_ID or not SELLAUTH_API_KEY:
+        await interaction.response.send_message(
+            "SellAuth API is not configured.", ephemeral=True
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True)
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(
+                f"https://api.sellauth.com/v1/shops/{SELLAUTH_SHOP_ID}/coupons",
+                headers={"Authorization": f"Bearer {SELLAUTH_API_KEY}"},
+            ) as resp:
+                if resp.status != 200:
+                    await interaction.followup.send(
+                        f"Failed to fetch coupons (API returned {resp.status}).", ephemeral=True
+                    )
+                    return
+                result = await resp.json()
+
+        coupon_list = result.get("data", [])
+        target = None
+        for c in coupon_list:
+            if c.get("code", "").upper() == code.upper():
+                target = c
+                break
+
+        if not target:
+            await interaction.followup.send(
+                f"Coupon `{code.upper()}` not found.", ephemeral=True
+            )
+            return
+
+        uses = target.get("uses", 0)
+        discount = target.get("discount", "0")
+        ctype = target.get("type", "percentage")
+        max_uses = target.get("max_uses")
+
+        if ctype == "percentage":
+            discount_str = f"{discount}%"
+        else:
+            discount_str = f"${discount}"
+
+        uses_str = f"{uses}" if max_uses is None else f"{uses} / {max_uses}"
+
+        embed = discord.Embed(
+            title=f"Coupon Info — {target.get('code', '???').upper()}",
+            color=0x5865F2,
+            timestamp=discord.utils.utcnow(),
+        )
+        embed.add_field(name="Discount", value=discount_str, inline=True)
+        embed.add_field(name="Uses", value=uses_str, inline=True)
+        embed.add_field(name="Type", value=ctype.title(), inline=True)
+        embed.set_footer(text=f"Requested by {interaction.user.display_name}")
+        await interaction.followup.send(embed=embed)
+
+    except Exception as e:
+        logging.error("SellAuth API error: %s", e)
+        await interaction.followup.send(
+            "Error connecting to SellAuth API.", ephemeral=True
+        )
+
+
 @bot.tree.command(name="couponremove", description="Remove a coupon code from the website")
 @app_commands.describe(code="The coupon code to delete")
 @app_commands.guild_only()
