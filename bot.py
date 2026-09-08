@@ -571,16 +571,21 @@ async def live_leaderboard_loop(message: discord.Message):
     try:
         while True:
             await asyncio.sleep(30)
-            data = await fetch_coupon_leaderboard_data()
-            if data is None:
-                continue
-            embed = build_leaderboard_embed(data, seconds_remaining=30)
             try:
+                data = await fetch_coupon_leaderboard_data()
+                if data is None:
+                    logging.warning("Live leaderboard: API returned None")
+                    continue
+                embed = build_leaderboard_embed(data, seconds_remaining=30)
                 await message.edit(embed=embed)
-            except discord.HTTPException:
+            except discord.HTTPException as e:
+                logging.error("Live leaderboard edit failed: %s", e)
                 break
+            except Exception as e:
+                logging.error("Live leaderboard error: %s", e)
+                continue
     except asyncio.CancelledError:
-        pass
+        logging.info("Live leaderboard cancelled")
     finally:
         live_leaderboard_task = None
 
