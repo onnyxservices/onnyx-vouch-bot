@@ -1,4 +1,5 @@
 import aiohttp
+import asyncio
 import json
 import logging
 import os
@@ -520,41 +521,22 @@ async def setvouchchannel(interaction: discord.Interaction, channel: discord.Tex
     )
 
 
-@bot.tree.command(name="leaderboardwebsite", description="Most used coupon codes from the website")
-@app_commands.guild_only()
-async def leaderboardwebsite(interaction: discord.Interaction):
-    if not SELLAUTH_SHOP_ID or not SELLAUTH_API_KEY:
-        await interaction.response.send_message(
-            "SellAuth API is not configured.", ephemeral=True
-        )
-        return
+live_leaderboard_task: asyncio.Task | None = None
 
-    await interaction.response.defer()
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"https://api.sellauth.com/v1/shops/{SELLAUTH_SHOP_ID}/coupons",
-                headers={"Authorization": f"Bearer {SELLAUTH_API_KEY}"},
-            ) as resp:
-                if resp.status != 200:
-                    await interaction.followup.send(
-                        f"Failed to fetch coupons (API returned {resp.status}).", ephemeral=True
-                    )
-                    return
-                coupons = await resp.json()
-    except Exception as e:
-        logging.error("SellAuth API error: %s", e)
-        await interaction.followup.send(
-            "Error connecting to SellAuth API.", ephemeral=True
-        )
-        return
+async def fetch_coupon_leaderboard_data():
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            f"https://api.sellauth.com/v1/shops/{SELLAUTH_SHOP_ID}/coupons",
+            headers={"Authorization": f"Bearer {SELLAUTH_API_KEY}"},
+        ) as resp:
+            if resp.status != 200:
+                return None
+            return await resp.json()
 
-    coupon_list = coupons.get("data", [])
-    if not coupon_list:
-        await interaction.followup.send("No coupons found.", ephemeral=True)
-        return
 
+def build_leaderboard_embed(coupons_data, seconds_remaining=None):
+    coupon_list = coupons_data.get("data", [])
     sorted_coupons = sorted(coupon_list, key=lambda c: c.get("uses", 0), reverse=True)[:10]
 
     medals = ["\U0001F947", "\U0001F948", "\U0001F949"]
@@ -577,8 +559,60 @@ async def leaderboardwebsite(interaction: discord.Interaction):
         color=0x5865F2,
         timestamp=discord.utils.utcnow(),
     )
-    embed.set_footer(text="From onnyxtweaks.mysellauth.com")
-    await interaction.followup.send(embed=embed)
+    if seconds_remaining is not None:
+        embed.set_footer(text=f"Leaderboard will refresh in {seconds_remaining} seconds!")
+    else:
+        embed.set_footer(text="From onnyxtweaks.mysellauth.com")
+    return embed
+
+
+async def live_leaderboard_loop(message: discord.Message):
+    global live_leaderboard_task
+    try:
+        while True:
+            await asyncio.sleep(30)
+            data = await fetch_coupon_leaderboard_data()
+            if data is None:
+                continue
+            embed = build_leaderboard_embed(data, seconds_remaining=30)
+            try:
+                await message.edit(embed=embed)
+            except discord.HTTPException:
+                break
+    except asyncio.CancelledError:
+        pass
+    finally:
+        live_leaderboard_task = None
+
+
+@bot.tree.command(name="leaderboardwebsite", description="Most used coupon codes from the website")
+@app_commands.guild_only()
+async def leaderboardwebsite(interaction: discord.Interaction):
+    global live_leaderboard_task
+    if not SELLAUTH_SHOP_ID or not SELLAUTH_API_KEY:
+        await interaction.response.send_message(
+            "SellAuth API is not configured.", ephemeral=True
+        )
+        return
+
+    await interaction.response.defer()
+
+    data = await fetch_coupon_leaderboard_data()
+    if data is None:
+        await interaction.followup.send("Failed to fetch coupons.", ephemeral=True)
+        return
+
+    coupon_list = data.get("data", [])
+    if not coupon_list:
+        await interaction.followup.send("No coupons found.", ephemeral=True)
+        return
+
+    embed = build_leaderboard_embed(data, seconds_remaining=30)
+    msg = await interaction.followup.send(embed=embed)
+
+    if live_leaderboard_task is not None:
+        live_leaderboard_task.cancel()
+    live_leaderboard_task = asyncio.create_task(live_leaderboard_loop(msg))
 
 
 COUPON_CREATOR_ROLE_ID = 1546664972774412318
@@ -668,40 +702,6 @@ async def couponcreate(
     embed.set_footer(text=f"Created by {interaction.user.display_name}")
     await interaction.followup.send(embed=embed)
 
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"https://api.sellauth.com/v1/shops/{SELLAUTH_SHOP_ID}/coupons",
-                headers={"Authorization": f"Bearer {SELLAUTH_API_KEY}"},
-            ) as resp:
-                if resp.status == 200:
-                    coupons = await resp.json()
-                    coupon_list = coupons.get("data", [])
-                    sorted_coupons = sorted(coupon_list, key=lambda c: c.get("uses", 0), reverse=True)[:10]
-                    medals = ["\U0001F947", "\U0001F948", "\U0001F949"]
-                    lb_lines = []
-                    for j, c in enumerate(sorted_coupons):
-                        prefix = medals[j] if j < 3 else f"**#{j+1}**"
-                        lb_code = c.get("code", "???")
-                        uses = c.get("uses", 0)
-                        disc = c.get("discount", "0")
-                        ctype = c.get("type", "percentage")
-                        if ctype == "percentage":
-                            disc_str = f"{disc}%"
-                        else:
-                            disc_str = f"${disc}"
-                        lb_lines.append(f"{prefix} **{lb_code}** — {uses} uses ({disc_str} off)")
-                    lb_embed = discord.Embed(
-                        title="Coupon Leaderboard",
-                        description="\n".join(lb_lines),
-                        color=0x5865F2,
-                        timestamp=discord.utils.utcnow(),
-                    )
-                    lb_embed.set_footer(text="From onnyxtweaks.mysellauth.com")
-                    await interaction.followup.send(embed=lb_embed)
-    except Exception as e:
-        logging.error("Failed to post leaderboard after coupon create: %s", e)
-
 
 @bot.tree.command(name="couponremove", description="Remove a coupon code from the website")
 @app_commands.describe(code="The coupon code to delete")
@@ -772,40 +772,6 @@ async def couponremove(interaction: discord.Interaction, code: str):
     )
     embed.set_footer(text=f"Deleted by {interaction.user.display_name}")
     await interaction.followup.send(embed=embed)
-
-    try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                f"https://api.sellauth.com/v1/shops/{SELLAUTH_SHOP_ID}/coupons",
-                headers={"Authorization": f"Bearer {SELLAUTH_API_KEY}"},
-            ) as resp:
-                if resp.status == 200:
-                    coupons = await resp.json()
-                    coupon_list = coupons.get("data", [])
-                    sorted_coupons = sorted(coupon_list, key=lambda c: c.get("uses", 0), reverse=True)[:10]
-                    medals = ["\U0001F947", "\U0001F948", "\U0001F949"]
-                    lb_lines = []
-                    for j, c in enumerate(sorted_coupons):
-                        prefix = medals[j] if j < 3 else f"**#{j+1}**"
-                        lb_code = c.get("code", "???")
-                        uses = c.get("uses", 0)
-                        disc = c.get("discount", "0")
-                        ctype = c.get("type", "percentage")
-                        if ctype == "percentage":
-                            disc_str = f"{disc}%"
-                        else:
-                            disc_str = f"${disc}"
-                        lb_lines.append(f"{prefix} **{lb_code}** — {uses} uses ({disc_str} off)")
-                    lb_embed = discord.Embed(
-                        title="Coupon Leaderboard",
-                        description="\n".join(lb_lines),
-                        color=0x5865F2,
-                        timestamp=discord.utils.utcnow(),
-                    )
-                    lb_embed.set_footer(text="From onnyxtweaks.mysellauth.com")
-                    await interaction.followup.send(embed=lb_embed)
-    except Exception as e:
-        logging.error("Failed to post leaderboard after coupon remove: %s", e)
 
 
 @bot.event
